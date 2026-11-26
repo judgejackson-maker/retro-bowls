@@ -1,0 +1,589 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Retro Football Legends Ultimate</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#10151f;color:white;
+ font-family:monospace;text-align:center;
+}
+header{
+ background:linear-gradient(120deg,#101c32,#234b38);
+ padding:12px;border-bottom:3px solid #ffe36b;
+}
+h1{color:#ffe36b;font-size:clamp(20px,4vw,34px);margin:5px}
+button,select{
+ background:#ffdf63;color:#18202c;
+ border:0;padding:12px 17px;
+ margin:4px;border-radius:7px;
+ font-weight:bold;font-family:monospace;
+ cursor:pointer;
+}
+button:hover{background:white;transform:scale(1.04)}
+#stats{
+ display:flex;justify-content:center;gap:22px;
+ flex-wrap:wrap;padding:12px;
+ background:#202b3b;font-size:16px;
+}
+#game{
+ width:min(96vw,1000px);
+ margin:15px auto;
+ position:relative;
+ border:4px solid white;
+ box-shadow:0 0 25px #000;
+}
+canvas{
+ display:block;width:100%;height:auto;
+ background:#32864a;
+ image-rendering:pixelated;
+ touch-action:none;
+}
+#message{
+ color:#ffe36b;font-size:18px;
+ min-height:30px;padding:8px;
+}
+#controls{padding:10px}
+#pad{
+ display:grid;grid-template-columns:repeat(3,55px);
+ gap:5px;justify-content:center;
+ margin:10px auto;
+}
+#pad button{padding:13px;margin:0}
+#bottom{color:#aabbd0;padding:12px}
+.hidden{display:none}
+</style>
+</head>
+<body>
+
+<header>
+<h1>🏈 RETRO FOOTBALL LEGENDS</h1>
+<div>ULTIMATE EDITION</div>
+</header>
+
+<div id="stats">
+ <span>BLUE: <b id="blue">0</b></span>
+ <span>RED: <b id="red">0</b></span>
+ <span>TIME: <b id="time">90</b></span>
+ <span>DOWN: <b id="down">1</b></span>
+ <span>TO GO: <b id="togo">10</b></span>
+ <span>YARD: <b id="yard">20</b></span>
+</div>
+
+<div id="game">
+<canvas id="c" width="1000" height="560"></canvas>
+</div>
+
+<div id="message">WELCOME TO RETRO FOOTBALL LEGENDS!</div>
+
+<div id="controls">
+ <button onclick="startGame()">▶ START GAME</button>
+ <button onclick="newPlay('run')">🏃 RUN</button>
+ <button onclick="newPlay('pass')">🏈 PASS</button>
+ <button onclick="newPlay('kick')">🥅 FIELD GOAL</button>
+ <button onclick="togglePause()">⏸ PAUSE</button>
+ <button onclick="full()">⛶ FULLSCREEN</button>
+ <br>
+ <label>Difficulty:
+ <select id="difficulty">
+ <option value="easy">ROOKIE</option>
+ <option value="normal" selected>PRO</option>
+ <option value="hard">ALL STAR</option>
+ </select></label>
+</div>
+
+<div id="pad">
+ <span></span><button data-key="up">▲</button><span></span>
+ <button data-key="left">◀</button>
+ <button data-key="down">▼</button>
+ <button data-key="right">▶</button>
+</div>
+
+<div id="bottom">
+Move: Arrow keys / WASD<br>
+Space: Throw pass | Mouse: Aim pass<br>
+Avoid defenders and reach the right end zone!
+</div>
+
+<script>
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d");
+
+const W=1000,H=560;
+let state="menu";
+let blue=0,red=0,clock=90,down=1;
+let yard=20,toGo=10;
+let player,defenders,receiver;
+let ball=null,playType="run";
+let particles=[];
+let tick=0,flash=0;
+let keys={};
+let last=0,frame=0;
+let message="WELCOME TO RETRO FOOTBALL LEGENDS!";
+let paused=false;
+let difficulty=1;
+
+const $=id=>document.getElementById(id);
+
+function say(t){
+ message=t;
+ $("message").textContent=t;
+}
+
+function updateStats(){
+ $("blue").textContent=blue;
+ $("red").textContent=red;
+ $("time").textContent=clock;
+ $("down").textContent=down;
+ $("togo").textContent=toGo;
+ $("yard").textContent=yard;
+}
+
+function startGame(){
+ blue=0;red=0;clock=90;
+ down=1;yard=20;toGo=10;
+ state="playing";paused=false;
+ difficulty=$("difficulty").value==="easy"?0.7:
+ $("difficulty").value==="hard"?1.35:1;
+ newPlay("run");
+ say("GAME ON! MOVE YOUR PLAYER!");
+ updateStats();
+}
+
+function newPlay(type){
+ if(state==="menu")return;
+ if(state==="over")return;
+ if(state!=="playing"||paused)return;
+ playType=type;
+ ball=null;
+ player={x:160,y:280,vx:0,vy:0};
+ receiver={x:390,y:190,route:0};
+ defenders=[];
+ let count= difficulty===0.7?4:6;
+ for(let i=0;i<count;i++){
+  defenders.push({
+   x:450+(i%3)*130,
+   y:100+Math.floor(i/3)*230,
+   speed:(1.25+Math.random()*.65)*difficulty,
+   stun:0
+  });
+ }
+ if(type==="kick"){
+  kick();
+  return;
+ }
+ say(type==="pass"?"PASS PLAY! AIM AND PRESS SPACE!":
+ "RUN PLAY! DODGE THE DEFENDERS!");
+}
+
+function drawField(){
+ ctx.fillStyle="#287a43";
+ ctx.fillRect(0,0,W,H);
+
+ for(let i=0;i<10;i++){
+  ctx.fillStyle=i%2?"#32864a":"#398f50";
+  ctx.fillRect(i*100,0,100,H);
+ }
+
+ // End zones
+ ctx.fillStyle="#2459a9";
+ ctx.fillRect(0,0,65,H);
+ ctx.fillStyle="#b13d3d";
+ ctx.fillRect(935,0,65,H);
+
+ ctx.fillStyle="white";
+ ctx.font="bold 19px monospace";
+ ctx.save();
+ ctx.translate(38,280);
+ ctx.rotate(-Math.PI/2);
+ ctx.textAlign="center";
+ ctx.fillText("BLUE END ZONE",0,0);
+ ctx.restore();
+ ctx.save();
+ ctx.translate(962,280);
+ ctx.rotate(Math.PI/2);
+ ctx.textAlign="center";
+ ctx.fillText("RED END ZONE",0,0);
+ ctx.restore();
+
+ // Yard lines
+ for(let x=100;x<940;x+=100){
+  ctx.strokeStyle="#ffffffb0";
+  ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(x,0);
+  ctx.lineTo(x,H);ctx.stroke();
+  ctx.fillStyle="#ffffffcc";
+  ctx.font="bold 17px monospace";
+  ctx.textAlign="center";
+  ctx.fillText(Math.abs((x-500)/10),x,32);
+  ctx.fillText(Math.abs((x-500)/10),x,540);
+ }
+
+ // Hash marks
+ ctx.strokeStyle="#ffffff90";
+ ctx.lineWidth=2;
+ for(let x=80;x<940;x+=20){
+  ctx.beginPath();ctx.moveTo(x,260);
+  ctx.lineTo(x,270);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(x,290);
+  ctx.lineTo(x,300);ctx.stroke();
+ }
+
+ // Crowd and stadium border
+ ctx.fillStyle="#152332";
+ ctx.fillRect(0,0,W,12);
+ ctx.fillRect(0,H-12,W,12);
+
+ for(let i=0;i<85;i++){
+  ctx.fillStyle=["#f5d65b","#d85b5b","#e8e8e8","#4794df"][i%4];
+  ctx.fillRect((i*137)%W,5,5,5);
+  ctx.fillRect((i*137)%W,H-10,5,5);
+ }
+
+ // First down marker
+ let marker=Math.min(930,160+toGo*8);
+ ctx.strokeStyle="#ffe34d";
+ ctx.lineWidth=4;
+ ctx.setLineDash([10,8]);
+ ctx.beginPath();ctx.moveTo(marker,50);
+ ctx.lineTo(marker,510);ctx.stroke();
+ ctx.setLineDash([]);
+
+ // Line of scrimmage
+ ctx.strokeStyle="#70d7ff";
+ ctx.lineWidth=3;
+ ctx.beginPath();ctx.moveTo(160,48);
+ ctx.lineTo(160,512);ctx.stroke();
+}
+
+function drawPlayer(p,color,number){
+ ctx.save();
+ ctx.translate(p.x,p.y);
+ // Shadow
+ ctx.fillStyle="#0006";
+ ctx.fillRect(-13,12,29,7);
+ // Body
+ ctx.fillStyle=color;
+ ctx.fillRect(-12,-12,24,25);
+ // Helmet
+ ctx.fillStyle="#f1f2ed";
+ ctx.fillRect(-11,-20,22,14);
+ ctx.fillStyle=color;
+ ctx.fillRect(2,-15,12,5);
+ // Legs
+ ctx.fillStyle="#182332";
+ ctx.fillRect(-9,12,7,9);
+ ctx.fillRect(3,12,7,9);
+ ctx.fillStyle="white";
+ ctx.font="bold 10px monospace";
+ ctx.textAlign="center";
+ ctx.fillText(number||"7",0,5);
+ ctx.restore();
+}
+
+function drawBall(x,y){
+ ctx.save();
+ ctx.translate(x,y);
+ ctx.rotate(-.4);
+ ctx.fillStyle="#9a4e20";
+ ctx.beginPath();ctx.ellipse(0,0,12,7,0,0,Math.PI*2);ctx.fill();
+ ctx.strokeStyle="white";ctx.lineWidth=1.5;
+ ctx.beginPath();ctx.moveTo(-5,0);ctx.lineTo(5,0);ctx.stroke();
+ ctx.restore();
+}
+
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ drawField();
+
+ if(state!=="menu"){
+  if(receiver&&playType==="pass"){
+   drawPlayer(receiver,"#55baff","12");
+  }
+  if(defenders){
+   defenders.forEach((d,i)=>drawPlayer(d,"#df4141",i+1));
+  }
+  if(player){
+   drawPlayer(player,"#2479ef","7");
+  }
+ }
+ if(ball)drawBall(ball.x,ball.y);
+
+ particles.forEach(p=>{
+  ctx.fillStyle=p.color;
+  ctx.globalAlpha=Math.max(0,p.life/30);
+  ctx.fillRect(p.x,p.y,5,5);
+  ctx.globalAlpha=1;
+ });
+
+ if(state==="menu"){
+  ctx.fillStyle="#101c2ce8";
+  ctx.fillRect(150,110,700,340);
+  ctx.fillStyle="#ffe36b";
+  ctx.font="bold 45px monospace";
+  ctx.textAlign="center";
+  ctx.fillText("RETRO FOOTBALL",500,205);
+  ctx.fillText("LEGENDS",500,265);
+  ctx.fillStyle="white";
+  ctx.font="20px monospace";
+  ctx.fillText("THE ULTIMATE PIXEL FOOTBALL GAME",500,320);
+  ctx.fillText("PRESS START GAME",500,380);
+ }
+ if(paused){
+  ctx.fillStyle="#000b";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="white";ctx.font="bold 45px monospace";
+  ctx.textAlign="center";ctx.fillText("PAUSED",500,285);
+ }
+ if(state==="over"){
+  ctx.fillStyle="#101c2cf0";
+  ctx.fillRect(170,150,660,260);
+  ctx.fillStyle="#ffe36b";
+  ctx.font="bold 45px monospace";
+  ctx.textAlign="center";
+  ctx.fillText("GAME OVER",500,230);
+  ctx.fillStyle="white";ctx.font="25px monospace";
+  ctx.fillText("BLUE "+blue+"  -  "+red+" RED",500,290);
+  ctx.fillText("PRESS NEW GAME TO PLAY AGAIN",500,345);
+ }
+}
+
+function spawnParticles(x,y,color){
+ for(let i=0;i<15;i++){
+  particles.push({
+   x,y,
+   vx:(Math.random()-.5)*8,
+   vy:(Math.random()-.5)*8,
+   life:30,color
+  });
+ }
+}
+
+function tackle(){
+ if(state!=="playing")return;
+ state="ready";
+ say("TACKLED! DEFENSE STOPS THE PLAY!");
+ spawnParticles(player.x,player.y,"#ffe36b");
+ endPlay(false,0);
+}
+
+function touchdown(){
+ if(state!=="playing")return;
+ state="ready";
+ blue+=7;
+ say("🏆 TOUCHDOWN! +7 POINTS!");
+ spawnParticles(player.x,player.y,"#ffe36b");
+ for(let i=0;i<6;i++){
+  spawnParticles(500,280,["#ffdf55","#fff","#65d8ff"][i%3]);
+ }
+ updateStats();
+ endPlay(true,7);
+}
+
+function endPlay(scored,points){
+ if(scored){
+  down=1;toGo=10;yard=20;
+ }else{
+  let gain=Math.max(0,Math.floor((player.x-160)/8));
+  yard+=gain;
+  toGo-=gain;
+  if(toGo<=0){
+   down=1;toGo=10;
+   say("FIRST DOWN! KEEP GOING!");
+  }else{
+   down++;
+  }
+  if(down>4){
+   say("TURNOVER ON DOWNS!");
+   down=1;toGo=10;yard=20;
+   red+=7;
+  }
+ }
+ updateStats();
+ setTimeout(()=>{
+  if(clock>0&&state!=="over"){
+   state="playing";
+   newPlay("run");
+  }
+ },1300);
+}
+
+function kick(){
+ state="ready";
+ say("FIELD GOAL! PRESS SPACE TO KICK!");
+ player={x:260,y:280};
+ ball={x:260,y:280};
+ state="kick";
+}
+
+function shoot(){
+ if(state==="kick"){
+  let good=Math.random()>.28;
+  if(good){
+   blue+=3;say("FIELD GOAL IS GOOD! +3!");
+  }else say("FIELD GOAL MISSED!");
+  updateStats();
+  state="ready";
+  setTimeout(()=>{if(clock>0) {state="playing";newPlay("run")}},1200);
+  return;
+ }
+ if(state!=="playing"||playType!=="pass"||ball)return;
+
+ let targetX=Math.min(925,receiver.x);
+ let targetY=receiver.y;
+ ball={
+  x:player.x,y:player.y,
+  tx:targetX,ty:targetY,
+  progress:0
+ };
+ say("BALL IN THE AIR! 🏈");
+}
+
+function update(dt){
+ tick+=dt;
+ if(clock<=0){
+  state="over";
+  say("FINAL WHISTLE!");
+  return;
+ }
+ if(state==="kick"){
+  if(keys.space)shoot();
+  return;
+ }
+ if(state!=="playing"||paused)return;
+
+ let speed=3.5;
+ if(keys.left)player.x-=speed;
+ if(keys.right)player.x+=speed;
+ if(keys.up)player.y-=speed;
+ if(keys.down)player.y+=speed;
+
+ player.x=Math.max(70,Math.min(950,player.x));
+ player.y=Math.max(35,Math.min(525,player.y));
+
+ if(playType==="pass"&&!ball){
+  receiver.x=Math.min(850,receiver.x+1.4);
+  receiver.y+=Math.sin(tick*.004)*.9;
+ }
+
+ if(ball){
+  ball.progress+=.035;
+  let t=Math.min(1,ball.progress);
+  ball.x=player.x+(ball.tx-player.x)*t;
+  ball.y=player.y+(ball.ty-player.y)*t-
+   Math.sin(t*Math.PI)*90;
+  if(t>=1){
+   let caught=true;
+   for(let d of defenders){
+    if(Math.hypot(d.x-ball.tx,d.y-ball.ty)<32)caught=false;
+   }
+   if(caught){
+    player.x=ball.tx;player.y=ball.ty;
+    playType="run";ball=null;
+    say("CATCH! RUN WITH IT!");
+    spawnParticles(player.x,player.y,"#70d7ff");
+   }else{
+    ball=null;
+    say("INCOMPLETE PASS!");
+    state="ready";
+    endPlay(false,0);
+   }
+  }
+ }
+
+ defenders.forEach(d=>{
+  if(d.stun>0){d.stun--;return;}
+  if(player.x>d.x-130){
+   let dx=player.x-d.x,dy=player.y-d.y;
+   let dist=Math.hypot(dx,dy)||1;
+   d.x+=dx/dist*d.speed;
+   d.y+=dy/dist*d.speed;
+  }
+  if(Math.hypot(player.x-d.x,player.y-d.y)<25){
+   tackle();
+  }
+ });
+
+ if(player.x>=925)touchdown();
+
+ particles.forEach(p=>{
+  p.x+=p.vx;p.y+=p.vy;p.life--;
+ });
+ particles=particles.filter(p=>p.life>0);
+}
+
+function loop(t){
+ let dt=Math.min(t-last,40)||16;
+ last=t;
+ update(dt);
+ draw();
+ requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function keyDown(e){
+ let k=e.key.toLowerCase();
+ if(["arrowup","arrowdown","arrowleft","arrowright"," "].includes(k))e.preventDefault();
+ if(k==="arrowup"||k==="w")keys.up=true;
+ if(k==="arrowdown"||k==="s")keys.down=true;
+ if(k==="arrowleft"||k==="a")keys.left=true;
+ if(k==="arrowright"||k==="d")keys.right=true;
+ if(k===" "){
+  keys.space=true;
+  if(state==="kick")shoot();
+  else if(playType==="pass")shoot();
+ }
+}
+function keyUp(e){
+ let k=e.key.toLowerCase();
+ if(k==="arrowup"||k==="w")keys.up=false;
+ if(k==="arrowdown"||k==="s")keys.down=false;
+ if(k==="arrowleft"||k==="a")keys.left=false;
+ if(k==="arrowright"||k==="d")keys.right=false;
+ if(k===" ")keys.space=false;
+}
+document.addEventListener("keydown",keyDown);
+document.addEventListener("keyup",keyUp);
+
+document.querySelectorAll("[data-key]").forEach(b=>{
+ let k=b.dataset.key;
+ b.addEventListener("pointerdown",e=>{e.preventDefault();keys[k]=true});
+ b.addEventListener("pointerup",()=>keys[k]=false);
+ b.addEventListener("pointerleave",()=>keys[k]=false);
+ b.addEventListener("pointercancel",()=>keys[k]=false);
+});
+
+canvas.addEventListener("pointerdown",e=>{
+ if(state!=="playing"||playType!=="pass")return;
+ let rect=canvas.getBoundingClientRect();
+ let x=(e.clientX-rect.left)*W/rect.width;
+ let y=(e.clientY-rect.top)*H/rect.height;
+ receiver.x=Math.max(200,Math.min(900,x));
+ receiver.y=Math.max(35,Math.min(525,y));
+});
+
+function togglePause(){
+ if(state!=="playing")return;
+ paused=!paused;
+ say(paused?"GAME PAUSED":"GAME RESUMED");
+}
+function full(){
+ if(!document.fullscreenElement)
+  document.documentElement.requestFullscreen();
+ else document.exitFullscreen();
+}
+
+setInterval(()=>{
+ if(state==="playing"&&!paused&&clock>0){
+  clock--;
+  updateStats();
+  if(clock===0){state="over";say("FINAL WHISTLE!");}
+ }
+},1000);
+
+updateStats();
+</script>
+</body>
+</html>
